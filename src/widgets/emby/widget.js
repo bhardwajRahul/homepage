@@ -8,10 +8,18 @@ const widget = {
     Sessions: {
       endpoint: "Sessions",
     },
-    PlayControl: {
+    Count: {
+      endpoint: "Items/Counts",
+    },
+    Unpause: {
       method: "POST",
-      endpoint: "Sessions/{sessionId}/Playing/{command}",
-      segments: ["sessionId", "command"],
+      endpoint: "Sessions/{sessionId}/Playing/Unpause",
+      segments: ["sessionId"],
+    },
+    Pause: {
+      method: "POST",
+      endpoint: "Sessions/{sessionId}/Playing/Pause",
+      segments: ["sessionId"],
     },
   },
 };

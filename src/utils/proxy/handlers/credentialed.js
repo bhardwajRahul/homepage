@@ -3,15 +3,16 @@ import { formatApiCall, sanitizeErrorURL } from "utils/proxy/api-helpers";
 import validateWidgetData from "utils/proxy/validate-widget-data";
 import { httpProxy } from "utils/proxy/http";
 import createLogger from "utils/logger";
+import { getSettings } from "utils/config/config";
 import widgets from "widgets/widgets";
 
 const logger = createLogger("credentialedProxyHandler");
 
 export default async function credentialedProxyHandler(req, res, map) {
-  const { group, service, endpoint } = req.query;
+  const { group, service, endpoint, index } = req.query;
 
   if (group && service) {
-    const widget = await getServiceWidget(group, service);
+    const widget = await getServiceWidget(group, service, index);
 
     if (!widgets?.[widget.type]?.api) {
       return res.status(403).json({ error: "Service does not support API calls" });
@@ -24,14 +25,38 @@ export default async function credentialedProxyHandler(req, res, map) {
         "Content-Type": "application/json",
       };
 
-      if (widget.type === "coinmarketcap") {
+      if (widget.type === "stocks") {
+        const { providers } = getSettings();
+        if (widget.provider === "finnhub" && providers?.finnhub) {
+          headers["X-Finnhub-Token"] = `${providers?.finnhub}`;
+        }
+      } else if (widget.type === "coinmarketcap") {
         headers["X-CMC_PRO_API_KEY"] = `${widget.key}`;
       } else if (widget.type === "gotify") {
         headers["X-gotify-Key"] = `${widget.key}`;
-      } else if (widget.type === "authentik") {
+      } else if (
+        [
+          "argocd",
+          "authentik",
+          "cloudflared",
+          "ghostfolio",
+          "headscale",
+          "linkwarden",
+          "mealie",
+          "netalertx",
+          "tailscale",
+          "tandoor",
+          "pterodactyl",
+          "vikunja",
+        ].includes(widget.type)
+      ) {
         headers.Authorization = `Bearer ${widget.key}`;
       } else if (widget.type === "truenas") {
-        headers.Authorization = `Bearer ${widget.key}`;
+        if (widget.key) {
+          headers.Authorization = `Bearer ${widget.key}`;
+        } else {
+          headers.Authorization = `Basic ${Buffer.from(`${widget.username}:${widget.password}`).toString("base64")}`;
+        }
       } else if (widget.type === "proxmox") {
         headers.Authorization = `PVEAPIToken=${widget.username}=${widget.password}`;
       } else if (widget.type === "proxmoxbackupserver") {
@@ -43,9 +68,36 @@ export default async function credentialedProxyHandler(req, res, map) {
         headers.Authorization = `Token ${widget.key}`;
       } else if (widget.type === "miniflux") {
         headers["X-Auth-Token"] = `${widget.key}`;
-      } else if (widget.type === "cloudflared") {
-        headers["X-Auth-Email"] = `${widget.email}`;
-        headers["X-Auth-Key"] = `${widget.key}`;
+      } else if (widget.type === "nextcloud") {
+        if (widget.key) {
+          headers["NC-Token"] = `${widget.key}`;
+        } else {
+          headers.Authorization = `Basic ${Buffer.from(`${widget.username}:${widget.password}`).toString("base64")}`;
+        }
+      } else if (widget.type === "paperlessngx") {
+        if (widget.key) {
+          headers.Authorization = `Token ${widget.key}`;
+        } else {
+          headers.Authorization = `Basic ${Buffer.from(`${widget.username}:${widget.password}`).toString("base64")}`;
+        }
+      } else if (widget.type === "azuredevops") {
+        headers.Authorization = `Basic ${Buffer.from(`$:${widget.key}`).toString("base64")}`;
+      } else if (widget.type === "glances") {
+        headers.Authorization = `Basic ${Buffer.from(`${widget.username}:${widget.password}`).toString("base64")}`;
+      } else if (widget.type === "plantit") {
+        headers.Key = `${widget.key}`;
+      } else if (widget.type === "myspeed") {
+        headers.Password = `${widget.password}`;
+      } else if (widget.type === "esphome") {
+        if (widget.username && widget.password) {
+          headers.Authorization = `Basic ${Buffer.from(`${widget.username}:${widget.password}`).toString("base64")}`;
+        } else if (widget.key) {
+          headers.Cookie = `authenticated=${widget.key}`;
+        }
+      } else if (widget.type === "wgeasy") {
+        headers.Authorization = widget.password;
+      } else if (widget.type === "gitlab") {
+        headers["PRIVATE-TOKEN"] = widget.key;
       } else {
         headers["X-API-Key"] = `${widget.key}`;
       }
@@ -59,6 +111,10 @@ export default async function credentialedProxyHandler(req, res, map) {
 
       let resultData = data;
 
+      if (resultData.error?.url) {
+        resultData.error.url = sanitizeErrorURL(url);
+      }
+
       if (status === 204 || status === 304) {
         return res.status(status).end();
       }
@@ -67,15 +123,13 @@ export default async function credentialedProxyHandler(req, res, map) {
         logger.error("HTTP Error %d calling %s", status, url.toString());
       }
 
-      if (!validateWidgetData(widget, endpoint, data)) {
-        if (data.error && data.error.url) {
-          data.error.url = sanitizeErrorURL(url);
+      if (status === 200) {
+        if (!validateWidgetData(widget, endpoint, resultData)) {
+          return res
+            .status(500)
+            .json({ error: { message: "Invalid data", url: sanitizeErrorURL(url), data: resultData } });
         }
-        return res.status(500).json({error: {message: "Invalid data", url: sanitizeErrorURL(url), data}});
-      }
-
-      if (status === 200 && map) {
-        resultData = map(data);
+        if (map) resultData = map(resultData);
       }
 
       if (contentType) res.setHeader("Content-Type", contentType);

@@ -4,6 +4,7 @@
 /node_modules
 /.pnp
 .pnp.js
+.pnpm-store
 
 # testing
 /coverage
@@ -45,4 +46,9 @@ next-env.d.ts
 # IDEs
 /.idea/
 
+# MkDocs documentation
+site*/
+.cache/
 
+# venv
+.venv/
